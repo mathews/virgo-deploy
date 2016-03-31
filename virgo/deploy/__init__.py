@@ -10,7 +10,7 @@ import os,shutil,logging,platform,subprocess,time,psutil
 log = logging.getLogger("deploy")
 
 class BundleDeployer:
-    def __init__(self,virgo_home,localRepo):
+    def __init__(self,virgo_home,localRepo,timeout,app_success_log):
         '''
 
         :param virgo_home:
@@ -19,6 +19,9 @@ class BundleDeployer:
         '''
         self._virgo_home = virgo_home
         self._localRepo = localRepo
+        self._timeout = timeout
+        self._app_success_log = app_success_log
+        self.shutteddown = False
 
         abs_virgo_repo = virgo_home + os.path.sep +localRepo
 
@@ -38,6 +41,35 @@ class BundleDeployer:
         '''
 
         return os.path.exists(self._virgo_home + os.path.sep +'pickup' +  os.path.sep + fileName )
+
+
+    def getAbbreviatedPath(self,path):
+
+        abbr_path = path
+
+        sys = os.name
+
+
+        if sys == 'nt':
+            n = path.rfind(os.path.sep)
+            parent  = path[0:n]
+            current = path[n+1:]
+
+            p =  subprocess.Popen('dir /x',stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True,cwd=parent)
+            out = p.communicate()
+            out1 = out[0].splitlines()
+
+            for x in out1:
+                if x.find(current) != -1 and x.find('<DIR>') != -1:
+                    path_attr = x.split(' ')
+                    #if path_attr[17] == current:
+                    abbr_path =  parent +os.path.sep +path_attr[16]
+                    log.info(' got windows abbrevited path as ' +  abbr_path)
+
+        log.info(' got abbrevited path as ' +  abbr_path)
+
+        return abbr_path
+
 
 
     def deploy(self,fileName):
@@ -70,12 +102,21 @@ class BundleDeployer:
 
         :return:
         '''
+
+        abbr_home = self.getAbbreviatedPath(virgo_home)
+
         ps = psutil.pids()
+
+        log.debug('got processes - ' + str(ps))
 
         for p in ps:
             try:
                 proc = psutil.Process(p)
-                if proc.cwd() == virgo_home:
+
+                if proc.cwd() == abbr_home:
+
+                    log.info('found process with cwd as virgo_home, cwd = '+ proc.cwd())
+
                     #if the virgo process was started within five minutes
                     if time.time()-proc.create_time() < 300:
                         error_msg = 'virgo process - ' + str(p) + ' was started within five minutes!!!'
@@ -84,12 +125,15 @@ class BundleDeployer:
                     else:
                         proc.terminate()
                         log.warning('virgo process - ' + str(p) + ' is terminated!!!')
-                        break
+                        #break
             except psutil.AccessDenied:
                 pass
             except Exception ,e:
                 log.error('Error shutting down virgo!!!')
                 raise e
+        # mark shutted down
+        self.shutteddown = True
+
 
     def clearPath(self,path):
 
@@ -102,6 +146,19 @@ class BundleDeployer:
                     os.remove(filepath)
                 elif os.path.isdir(filepath):
                     shutil.rmtree(filepath,True)
+
+    def clean_path(filename):
+        if os.path.isdir(filename):
+            for root, dirs, files in os.walk(filename,topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                    print  os.path.join(root,name)
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
+                    print "delete %s" % (os.path.join(root,name))
+            os.rmdir(filename)
+        else:
+            os.remove(filename)
 
 
     def restartVirgo(self):
@@ -121,18 +178,20 @@ class BundleDeployer:
         # try to shutdown  virgo first
         commd_prefix = self._virgo_home+os.path.sep +'bin' + os.path.sep
 
-        shutdown = prefix + commd_prefix+ 'shutdown'+ suffix
-
+        #shutdown = prefix + commd_prefix+ 'shutdown'+ suffix
         #shut_proc = subprocess.Popen(shutdown, stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True,cwd=commd_prefix)
         #shut_proc.wait()
-        #log.info('virgo shutted down successfully!!!')
 
-        self.shutdownVirgo(self._virgo_home)
+        if not self.shutteddown:
+            log.info('virgo is going to be shutted down!!!')
+
+            self.shutdownVirgo(self._virgo_home)
+
+            log.info('virgo shutted down successfully ...... ')
 
 
-        self.clearPath(os.path.join( self._virgo_home, 'serviceability' + os.path.sep + 'logs'))
-        self.clearPath(os.path.join( self._virgo_home, 'serviceability' + os.path.sep + 'eventlogs'))
-        self.clearPath(os.path.join( self._virgo_home, 'work'))
+        self.clean_path(os.path.join( self._virgo_home, 'serviceability'))
+        self.clean_path(os.path.join( self._virgo_home, 'work'))
 
 
         start_cmd = prefix +  commd_prefix+ 'startup'+ suffix
@@ -142,25 +201,35 @@ class BundleDeployer:
         log.info('virgo starting ...... ')
 
         p =  subprocess.Popen(start_cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True,cwd=commd_prefix)
-        p.wait()
+        #Note here, the virgo process will never end, you should not wait for it to terminate
+        #p.wait()
 
         log_file = self._virgo_home+os.path.sep +'serviceability' + os.path.sep + 'logs'+ os.path.sep + 'log.log'
 
-        time_out = 4
+        time_out_count = 4
 
         while not os.path.exists(log_file):
             time.sleep(10)
-            time_out = time_out-1
-            if(time_out==0):
+            time_out_count = time_out_count-1
+            if(time_out_count==0):
                 log.error('virgo logging failed to start within 40 sec')
                 break
 
 
-        if time_out!=0 :
+        if time_out_count!=0 :
             with open(log_file,'r') as vlog:
+                time_out_count = self._timeout/10
                 while True:
                     logs = vlog.readline()
 
-                    if logs.find("Started plan 'org.eclipse.virgo.apps.admin.plan' version '3.0.0'") != -1:
-                        log.info('virgo started successfully!!!')
+                    #if logs.find("Started plan 'org.eclipse.virgo.apps.admin.plan' version '3.0.0'") != -1:
+                    if logs.find(self._app_success_log) != -1:
+                        log.info('virgo started applications successfully!!!')
                         break
+
+                    time.sleep(10)
+                    time_out_count = time_out_count-1
+                    if(time_out_count==0):
+                        log.error('virgo failed to start your applications within' + str(self._timeout) + ' sec')
+                        break
+

@@ -49,8 +49,8 @@ class BundleDownloader:
         '''
 
         fileName =  bundle_name + '-' + bundle_version + bundle_type
-        url = self._repository_url + os.path.sep + bundle_group.replace('.',os.path.sep) \
-              + os.path.sep + bundle_name+ os.path.sep + bundle_version + os.path.sep + fileName
+        url = self._repository_url + '/' + bundle_group.replace('.','/') \
+              + '/' + bundle_name+ '/' + bundle_version + '/' + fileName
 
         log.info('Retrieving bundle from ' + url)
 
