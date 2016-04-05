@@ -107,10 +107,11 @@ class BundleDeployer:
 
         :return:
         '''
+        log.debug('going to shutdown Virgo ...... ')
 
         ps = psutil.pids()
 
-        log.debug('got processes - ' + str(ps))
+        #log.debug('got processes - ' + str(ps))
 
         for p in ps:
             try:
@@ -155,15 +156,14 @@ class BundleDeployer:
 
     def clearPath(self,path):
 
-        if os.path.exists(path):
-            files_in_path = os.listdir(path)
+        if os.name == 'nt':
+            del_cmd = 'rd/s/q '
+        else:
+            del_cmd = 'rm -Rf '
 
-            for t in files_in_path:
-                filepath = os.path.join( path, t )
-                if os.path.isfile(filepath):
-                    os.remove(filepath)
-                elif os.path.isdir(filepath):
-                    shutil.rmtree(filepath,True)
+        os.system(del_cmd + path)
+
+
 
 
     def restartVirgo(self):
@@ -175,14 +175,16 @@ class BundleDeployer:
         log.info('about to restart virgo ...... ')
 
         if platform.system()=='Linux':
-            prefix = ''
-            suffix = '.sh &'
+            suffix = '.sh'
         else:
-            prefix = 'start /b '
             suffix = '.bat'
 
+        log.debug('prefix and suffix are ready!!! ')
+
         # try to shutdown  virgo first
-        commd_prefix = self._virgo_home+os.path.sep +'bin' + os.path.sep
+        commd_prefix = os.path.join(self._virgo_home, 'bin')
+
+        log.debug('commd_prefix = '+commd_prefix)
 
         #shutdown = prefix + commd_prefix+ 'shutdown'+ suffix
         #shut_proc = subprocess.Popen(shutdown, stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True,cwd=commd_prefix)
@@ -196,25 +198,25 @@ class BundleDeployer:
             log.info('virgo shutted down successfully ...... ')
 
 
-        self.cleanDir(os.path.join( self._virgo_home, 'serviceability'))
-        self.cleanDir(os.path.join( self._virgo_home, 'work'))
+        self.clearPath(os.path.join( self._virgo_home, 'serviceability','logs'))
+        self.clearPath(os.path.join( self._virgo_home, 'serviceability','eventlogs'))
+        self.clearPath(os.path.join( self._virgo_home, 'work'))
 
 
-        start_cmd = prefix +  commd_prefix+ 'startup'+ suffix
+        start_cmd = os.path.join( commd_prefix, 'startup'+ suffix)
 
-        #if os.name == 'nt':
-        #    start_cmd = start_cmd.replace('\\','\\\\')
-        #    commd_prefix = commd_prefix.replace('\\','\\\\')
 
         log.info('start_cmd = ' + start_cmd)
 
         log.info('virgo starting ...... ')
 
-        p =  subprocess.Popen(start_cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True,cwd=commd_prefix)
+        DETACHED_PROCESS = 8
+        p =  subprocess.Popen(start_cmd,shell=True,cwd=commd_prefix,creationflags=DETACHED_PROCESS, close_fds=True)
+        #p =  subprocess.Popen(start_cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True,cwd=commd_prefix)
         #Note here, the virgo process will never end, you should not wait for it to terminate
-        p.communicate()
+        #p.communicate()
         #p.wait()
-
+        log.info('virgo process is started as pid - '+ str(p.pid))
         #status, output = commands.getstatusoutput(start_cmd)
         #os.system(start_cmd)
 
@@ -224,7 +226,7 @@ class BundleDeployer:
 
         log_file = self._virgo_home+os.path.sep +'serviceability' + os.path.sep + 'logs'+ os.path.sep + 'log.log'
 
-        time_out_count = 6
+        time_out_count = 4
 
         while not os.path.exists(log_file):
             time.sleep(10)
@@ -234,7 +236,8 @@ class BundleDeployer:
                 #break
                 raise Exception('virgo logging failed to start within 60 sec')
 
-
+        # virgo needs a long time to start up, this will cause the salt-minion fail to return
+        '''
         if time_out_count!=0 :
             with open(log_file,'r') as vlog:
                 time_out_count = self._timeout/10
@@ -251,4 +254,4 @@ class BundleDeployer:
                     if(time_out_count==0):
                         log.error('virgo failed to start your applications within' + str(self._timeout) + ' sec')
                         break
-
+        '''
