@@ -5,12 +5,12 @@ Created on Sat Feb 20 00:32:38 2016
 @author: mathews
 """
 
-import os,shutil,logging,platform,subprocess,time,psutil
+import os,shutil,logging,platform,subprocess,time,psutil,commands
 
 log = logging.getLogger("deploy")
 
 class BundleDeployer:
-    def __init__(self,virgo_home,localRepo,timeout,app_success_log):
+    def __init__(self,salt,virgo_home,localRepo,timeout,app_success_log):
         '''
 
         :param virgo_home:
@@ -22,6 +22,7 @@ class BundleDeployer:
         self._timeout = timeout
         self._app_success_log = app_success_log
         self.shutteddown = False
+        self._salt = salt
 
         abs_virgo_repo = virgo_home + os.path.sep +localRepo
 
@@ -31,6 +32,10 @@ class BundleDeployer:
             except Exception, e:
                 self._localRepo = None
                 log.error('error creating local repository path in virgo!', e)
+
+        self._abbr_home = self.getAbbreviatedPath(virgo_home)
+
+
 
 
     def _isInPickup(self,fileName):
@@ -103,8 +108,6 @@ class BundleDeployer:
         :return:
         '''
 
-        abbr_home = self.getAbbreviatedPath(virgo_home)
-
         ps = psutil.pids()
 
         log.debug('got processes - ' + str(ps))
@@ -113,7 +116,7 @@ class BundleDeployer:
             try:
                 proc = psutil.Process(p)
 
-                if proc.cwd() == abbr_home:
+                if proc.cwd() == self._abbr_home:
 
                     log.info('found process with cwd as virgo_home, cwd = '+ proc.cwd())
 
@@ -134,6 +137,21 @@ class BundleDeployer:
         # mark shutted down
         self.shutteddown = True
 
+    def cleanDir(self, Dir ):
+        if os.path.isdir( Dir ):
+            paths = os.listdir( Dir )
+            for path in paths:
+                filePath = os.path.join( Dir, path )
+                if os.path.isfile( filePath ):
+                    try:
+                        os.remove( filePath )
+                    except os.error:
+                        log.error( "remove %s error." %filePath )
+                elif os.path.isdir( filePath ):
+                    if filePath[-4:].lower() == ".svn".lower():
+                        continue
+                    shutil.rmtree(filePath,True)
+        return True
 
     def clearPath(self,path):
 
@@ -147,19 +165,6 @@ class BundleDeployer:
                 elif os.path.isdir(filepath):
                     shutil.rmtree(filepath,True)
 
-    def clean_path(filename):
-        if os.path.isdir(filename):
-            for root, dirs, files in os.walk(filename,topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                    print  os.path.join(root,name)
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-                    print "delete %s" % (os.path.join(root,name))
-            os.rmdir(filename)
-        else:
-            os.remove(filename)
-
 
     def restartVirgo(self):
         '''
@@ -167,6 +172,7 @@ class BundleDeployer:
         start the virgo with the startup.sh script
         :return:
         '''
+        log.info('about to restart virgo ...... ')
 
         if platform.system()=='Linux':
             prefix = ''
@@ -190,11 +196,15 @@ class BundleDeployer:
             log.info('virgo shutted down successfully ...... ')
 
 
-        self.clean_path(os.path.join( self._virgo_home, 'serviceability'))
-        self.clean_path(os.path.join( self._virgo_home, 'work'))
+        self.cleanDir(os.path.join( self._virgo_home, 'serviceability'))
+        self.cleanDir(os.path.join( self._virgo_home, 'work'))
 
 
         start_cmd = prefix +  commd_prefix+ 'startup'+ suffix
+
+        #if os.name == 'nt':
+        #    start_cmd = start_cmd.replace('\\','\\\\')
+        #    commd_prefix = commd_prefix.replace('\\','\\\\')
 
         log.info('start_cmd = ' + start_cmd)
 
@@ -202,18 +212,27 @@ class BundleDeployer:
 
         p =  subprocess.Popen(start_cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE, shell=True,cwd=commd_prefix)
         #Note here, the virgo process will never end, you should not wait for it to terminate
+        p.communicate()
         #p.wait()
+
+        #status, output = commands.getstatusoutput(start_cmd)
+        #os.system(start_cmd)
+
+        #self._salt['cmd.run'](start_cmd, cwd=commd_prefix)
+
+        log.info('virgo is starting, about to check the log file!')
 
         log_file = self._virgo_home+os.path.sep +'serviceability' + os.path.sep + 'logs'+ os.path.sep + 'log.log'
 
-        time_out_count = 4
+        time_out_count = 6
 
         while not os.path.exists(log_file):
             time.sleep(10)
             time_out_count = time_out_count-1
             if(time_out_count==0):
-                log.error('virgo logging failed to start within 40 sec')
-                break
+                log.error('virgo logging failed to start within 60 sec')
+                #break
+                raise Exception('virgo logging failed to start within 60 sec')
 
 
         if time_out_count!=0 :

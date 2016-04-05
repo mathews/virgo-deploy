@@ -36,21 +36,24 @@ def _process_pillar_bundles(bundles_list):
 def deploy(proj_names):
     #__opts__ = salt.config.minion_config('/etc/salt/minion')
     #__grains__ = salt.loader.grains(__opts__)
+    log = logging.getLogger("virgo-deploy")
+
+    log.info('pillar items = '+str(__pillar__))
 
     #get pillar data
-    JENKINS_URL = __pillar__['JENKINS_URL']
-    JENKINS_USER = __pillar__['JENKINS_USER']
-    JENKINS_PASSWORD = __pillar__['JENKINS_PASSWORD']
-    JENKINS_NOTIF_MQ_URL = __pillar__['JENKINS_NOTIF_MQ_URL']
-    JENKINS_NOTIF_MQ_QUEUE = __pillar__['JENKINS_NOTIF_MQ_QUEUE']
-    VIRGO_HOME = __pillar__['VIRGO_HOME']
-    VIRGO_LOCAL_REPOSITORY = __pillar__['VIRGO_LOCAL_REPOSITORY']
-    MAVEN_REPOSITORY_URL = __pillar__['MAVEN_REPOSITORY_URL']
-    MAVEN_USER = __pillar__['MAVEN_USER']
-    MAVEN_PASSWORD = __pillar__['MAVEN_PASSWORD']
-    APP_TIME_OUT = __pillar__['APP_TIME_OUT']
-    APP_SUCCESS_LOG = __pillar__['APP_SUCCESS_LOG']
-    BUNDLE_LIST = __pillar__['bundles:bind:BUNDLE_LIST']
+    JENKINS_URL = __pillar__['bind']['JENKINS_URL']
+    JENKINS_USER = __pillar__['bind']['JENKINS_USER']
+    JENKINS_PASSWORD = __pillar__['bind']['JENKINS_PASSWORD']
+    JENKINS_NOTIF_MQ_URL = __pillar__['bind']['JENKINS_NOTIF_MQ_URL']
+    JENKINS_NOTIF_MQ_QUEUE = __pillar__['bind']['JENKINS_NOTIF_MQ_QUEUE']
+    VIRGO_HOME = __pillar__['bind']['VIRGO_HOME']
+    VIRGO_LOCAL_REPOSITORY = __pillar__['bind']['VIRGO_LOCAL_REPOSITORY']
+    MAVEN_REPOSITORY_URL = __pillar__['bind']['MAVEN_REPOSITORY_URL']
+    MAVEN_USER = __pillar__['bind']['MAVEN_USER']
+    MAVEN_PASSWORD = __pillar__['bind']['MAVEN_PASSWORD']
+    APP_TIME_OUT = __pillar__['bind']['APP_TIME_OUT']
+    APP_SUCCESS_LOG = __pillar__['bind']['APP_SUCCESS_LOG']
+    BUNDLE_LIST = __pillar__['bundles']['BUNDLE_LIST']
 
 
     LOCAL_TEMP_PATH = VIRGO_HOME + os.path.sep + 'work' + os.path.sep + 'tmp'
@@ -59,14 +62,15 @@ def deploy(proj_names):
 
     if not os.path.exists(log_path):
         os.mkdir(log_path)
-
+    '''
     logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
                     datefmt='%d %b %Y %H:%M:%S',
                     filename= log_path + os.path.sep + 'virgo-deploy.log',
                     filemode='w')
+    '''
 
-    log = logging.getLogger("virgo-deploy")
+
 
     log.info('JENKINS_URL = ' +  JENKINS_URL)
     log.info('JENKINS_USER = ' +  JENKINS_USER)
@@ -101,7 +105,7 @@ def deploy(proj_names):
     #builder = JenkinsBuilder(JENKINS_URL, JENKINS_USER,JENKINS_PASSWORD, \
         #                         JENKINS_NOTIF_MQ_URL,JENKINS_NOTIF_MQ_QUEUE)
     downloader = BundleDownloader(MAVEN_REPOSITORY_URL, MAVEN_USER, MAVEN_PASSWORD, LOCAL_TEMP_PATH)
-    deploy = BundleDeployer(VIRGO_HOME, VIRGO_LOCAL_REPOSITORY,APP_TIME_OUT, APP_SUCCESS_LOG)
+    deploy = BundleDeployer(__salt__,VIRGO_HOME, VIRGO_LOCAL_REPOSITORY,APP_TIME_OUT, APP_SUCCESS_LOG)
 
     try:
         # shutdown first
@@ -123,6 +127,7 @@ def deploy(proj_names):
     except Exception,e:
         log.error('Error deploying ' + proj_names )
         log.error(str(sys.exc_info()[0]) + ' - ' + str(sys.exc_info()[1]))
+        log.error(str(sys.exc_info()))
         return False
 
     return True
