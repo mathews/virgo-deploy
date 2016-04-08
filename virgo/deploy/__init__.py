@@ -10,7 +10,7 @@ import os,shutil,logging,platform,subprocess,time,psutil,commands
 log = logging.getLogger("deploy")
 
 class BundleDeployer:
-    def __init__(self,salt,virgo_home,localRepo,timeout,app_success_log):
+    def __init__(self,virgo_home,localRepo,timeout,app_success_log):
         '''
 
         :param virgo_home:
@@ -22,7 +22,6 @@ class BundleDeployer:
         self._timeout = timeout
         self._app_success_log = app_success_log
         self.shutteddown = False
-        self._salt = salt
 
         abs_virgo_repo = virgo_home + os.path.sep +localRepo
 
@@ -49,6 +48,13 @@ class BundleDeployer:
 
 
     def getAbbreviatedPath(self,path):
+        '''
+        windows will abbreviate the path name,
+        and use the abbreviated path name for process properties
+        we here rely on windows command to get the abbreviated path name
+        :param path:
+        :return:
+        '''
 
         abbr_path = path
 
@@ -139,6 +145,15 @@ class BundleDeployer:
         self.shutteddown = True
 
     def cleanDir(self, Dir ):
+        '''
+        some java program will write very deep file directories,
+        just as the temp file of tomcat or OSGI container.
+        this will cause the python stack overflow
+        Please notice these circumstances
+
+        :param Dir:
+        :return:
+        '''
         if os.path.isdir( Dir ):
             paths = os.listdir( Dir )
             for path in paths:
@@ -155,7 +170,11 @@ class BundleDeployer:
         return True
 
     def clearPath(self,path):
-
+        '''
+        reply on the os commands to delete the whole file tree
+        :param path:
+        :return:
+        '''
         if os.name == 'nt':
             del_cmd = 'rd/s/q '
         else:
@@ -205,7 +224,6 @@ class BundleDeployer:
 
         start_cmd = os.path.join( commd_prefix, 'startup'+ suffix)
 
-
         log.info('start_cmd = ' + start_cmd)
 
         log.info('virgo starting ...... ')
@@ -217,10 +235,7 @@ class BundleDeployer:
         #p.communicate()
         #p.wait()
         log.info('virgo process is started as pid - '+ str(p.pid))
-        #status, output = commands.getstatusoutput(start_cmd)
-        #os.system(start_cmd)
 
-        #self._salt['cmd.run'](start_cmd, cwd=commd_prefix)
 
         log.info('virgo is starting, about to check the log file!')
 

@@ -2,10 +2,20 @@ from virgo.vjenkins import JenkinsBuilder
 from virgo.httpclient import BundleDownloader
 from virgo.httpclient import BUNDLE_TYPES
 from virgo.deploy import BundleDeployer
+from virgo.email import EmailClient
+from multiprocessing import Process
+import logging, os, sys, time
 
-import logging, os, sys
+log = logging.getLogger("virgo-deploy")
+
 
 def _process_bundles_file(file_name):
+    '''
+    parse the string for bundle group, name , version and bundle type
+    escape if the line is empty or starts with a #
+    :param file_name:
+    :return:
+    '''
     bundles = list()
     with open(file_name, 'r') as fd:
         for line in fd.readlines():
@@ -20,6 +30,12 @@ def _process_bundles_file(file_name):
     return bundles
 
 def _process_pillar_bundles(bundles_list):
+    '''
+    parse the bundle config in pillar data
+
+    :param bundles_list:
+    :return:
+    '''
     bundles = list()
 
     for line in bundles_list:
@@ -33,10 +49,46 @@ def _process_pillar_bundles(bundles_list):
 
     return bundles
 
+def ltjob(log_file,app_success_log,timeout, server, port, username, passwd, to):
+    '''
+    This is a long time job, will take hours to finish,
+    so fork in a seperate process, other than the main process,
+    and notify the client by email instead
+
+    :return:
+    '''
+
+    error = False
+
+    with open(log_file,'r') as vlog:
+        time_out_count = timeout/10
+        while True:
+            logs = vlog.readline()
+
+            #if logs.find("Started plan 'org.eclipse.virgo.apps.admin.plan' version '3.0.0'") != -1:
+            if logs.find(app_success_log) != -1:
+                log.info('virgo started applications successfully!!!')
+                break
+
+            time.sleep(30)
+            time_out_count = time_out_count-1
+            if(time_out_count==0):
+                log.error('virgo failed to start your applications within' + str(timeout) + ' sec')
+                error = True
+                break
+
+    email = EmailClient(server,port,username,passwd)
+
+    if error:
+        email.sendNotif(to,'virgo failed to start your applications within' + str(timeout) + ' sec' )
+    else:
+        email.sendNotif(to,'virgo started successfully!!!')
+
+
 def deploy(proj_names):
     #__opts__ = salt.config.minion_config('/etc/salt/minion')
     #__grains__ = salt.loader.grains(__opts__)
-    log = logging.getLogger("virgo-deploy")
+
 
     log.info('pillar items = '+str(__pillar__))
 
@@ -53,6 +105,12 @@ def deploy(proj_names):
     MAVEN_PASSWORD = __pillar__['bind']['MAVEN_PASSWORD']
     APP_TIME_OUT = __pillar__['bind']['APP_TIME_OUT']
     APP_SUCCESS_LOG = __pillar__['bind']['APP_SUCCESS_LOG']
+    EMAIL_SERVER = __pillar__['bind']['EMAIL_SERVER']
+    EMAIL_PORT = __pillar__['bind']['EMAIL_PORT']
+    EMAIL_USERNAME = __pillar__['bind']['EMAIL_USERNAME']
+    EMAIL_PASSWD = __pillar__['bind']['EMAIL_PASSWD']
+    EMAIL_TO = __pillar__['bind']['EMAIL_TO']
+
     BUNDLE_LIST = __pillar__['bundles']['BUNDLE_LIST']
 
 
@@ -62,7 +120,10 @@ def deploy(proj_names):
 
     if not os.path.exists(log_path):
         os.mkdir(log_path)
+
     '''
+    sorry we cannot wait to config the logging, we want to use immediately
+
     logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
                     datefmt='%d %b %Y %H:%M:%S',
@@ -123,6 +184,21 @@ def deploy(proj_names):
             deploy.deploy(tmpBunlde)
 
         deploy.restartVirgo()
+
+        log_file = VIRGO_HOME+os.path.sep +'serviceability' + os.path.sep + 'logs'+ os.path.sep + 'log.log'
+
+        '''
+        some deployments may cost hours to finish,
+        we can not keep the salt command line client to wait for hours to terminate.
+        so we fork a seperate process to check if the virgo starts correctly.
+        and send a email to notify the final deployment result.
+        '''
+        p = Process(target=ltjob, args=(log_file, APP_SUCCESS_LOG, APP_TIME_OUT, EMAIL_SERVER, \
+                                        EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWD, EMAIL_TO))
+        p.start()
+        log.info('Child process '+str(p.pid) +' started, will notify job results bu email.')
+        # we don't wait for the child process to terminate
+        #p.join()
 
     except Exception,e:
         log.error('Error deploying ' + proj_names )
